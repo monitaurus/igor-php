@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -153,6 +154,45 @@ class MyService implements Symfony\Contracts\Service\ResetInterface {
 
 	if !found {
 		t.Error("Expected a WARNING finding for missing reset in ResetInterface")
+	}
+}
+
+func TestPHPVisitor_ResetInterface_StaticProperties(t *testing.T) {
+	content, err := os.ReadFile("../../test/fixtures/reset_static.php")
+	if err != nil {
+		t.Fatalf("Failed to read fixture: %v", err)
+	}
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	v := NewVisitor(content, &mockEngine{})
+	v.Walk(tree.RootNode())
+
+	remediationByMessage := make(map[string]string)
+	for _, f := range v.Findings() {
+		remediationByMessage[f.Message] = f.Remediation
+	}
+
+	expected := map[string]string{
+		"Property 'static::$cache' of StaticNotReset is mutated but not reset in reset().":       "Add 'self::$cache = ...' in the reset() method.",
+		"Property 'static::$counter' of LateStaticNotReset is mutated but not reset in reset().": "Add 'self::$counter = ...' in the reset() method.",
+	}
+	for message, remediation := range expected {
+		got, found := remediationByMessage[message]
+		if !found {
+			t.Errorf("Expected finding %q, got: %v", message, remediationByMessage)
+			continue
+		}
+		if got != remediation {
+			t.Errorf("Remediation for %q = %q, want %q", message, got, remediation)
+		}
+	}
+	if len(remediationByMessage) != len(expected) {
+		t.Errorf("Expected only %d findings, got: %v", len(expected), remediationByMessage)
 	}
 }
 

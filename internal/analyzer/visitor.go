@@ -960,7 +960,8 @@ func (v *PHPVisitor) logMutation(n *sitter.Node, prop string, static bool) {
 	if !static && (v.readonlyProps[prop] || v.workerSafeProps[prop] || v.finallyCleaned[prop]) {
 		return
 	}
-	if static && v.workerSafeProps[prop] {
+	// Scoped names keep their leading '$' (self::$cache), declared names do not.
+	if static && v.workerSafeProps[strings.TrimPrefix(prop, "$")] {
 		return
 	}
 
@@ -987,14 +988,13 @@ func (v *PHPVisitor) performResetCheck() {
 	}
 
 	for prop, info := range v.mutated {
-		if v.workerSafeProps[prop] {
-			continue
-		}
 		propName := prop
-		if strings.HasPrefix(prop, "static::") {
-			propName = strings.TrimPrefix(prop, "static::")
+		resetTarget := "$this->" + prop
+		if strings.HasPrefix(prop, "static::$") {
+			propName = strings.TrimPrefix(prop, "static::$")
+			resetTarget = "self::$" + propName
 		}
-		if !v.declaredProps[propName] {
+		if v.workerSafeProps[propName] || !v.declaredProps[propName] {
 			continue
 		}
 		if !v.resetted[prop] {
@@ -1006,7 +1006,7 @@ func (v *PHPVisitor) performResetCheck() {
 				Snippet:       info.snippet,
 				ASTDetails:    info.astDetails,
 				Dependencies:  v.dependencies,
-				Remediation:   fmt.Sprintf("Add '$this->%s = ...' in the reset() method.", prop),
+				Remediation:   fmt.Sprintf("Add '%s = ...' in the reset() method.", resetTarget),
 				ContextClass:  fullName,
 				ContextMethod: v.curMethod,
 			})
